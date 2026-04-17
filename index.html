@@ -574,7 +574,7 @@ LEADOS v3 - NEW FEATURE STYLES
       <button class="analytics-btn" onclick="saveBackup()">💾 Save Backup</button>
       <label class="analytics-btn">📂 Import Backup<input type="file" accept=".json" style="display:none" onchange="importBackup(event)"></label>
       <label class="analytics-btn">📥 Import CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(event)"></label>
-      <button class="analytics-btn danger" onclick="confirmReset()">🗑 Reset All Data</button>
+      <button class="analytics-btn danger" type="button" id="reset-data-btn" onclick="openResetModal()">🗑 Reset All Data</button>
     </div>
   </div>
 </div>
@@ -842,14 +842,14 @@ LEADOS v3 - NEW FEATURE STYLES
     <div class="modal-handle"></div>
     <div class="modal-header">
       <div class="modal-title">🗑 Reset All Data</div>
-      <button class="modal-close" onclick="closeModal('modal-reset')">×</button>
+      <button class="modal-close" type="button" onclick="closeModal('modal-reset')">×</button>
     </div>
     <div class="modal-body" style="padding:14px;">
       <div class="callprep-item">This will reset all leads, counters, goals, custom categories, filters, WhatsApp status tracking, and analytics data in this browser.</div>
       <div class="category-help" style="margin-bottom:12px;">This cannot be undone unless you import a backup file.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="analytics-btn" onclick="closeModal('modal-reset')">Cancel</button>
-        <button class="analytics-btn danger" onclick="executeResetAllData()">Reset Everything</button>
+        <button class="analytics-btn" type="button" onclick="closeModal('modal-reset')">Cancel</button>
+        <button class="analytics-btn danger" type="button" id="reset-confirm-btn" onclick="runResetAllData()">Reset Everything</button>
       </div>
     </div>
   </div>
@@ -2185,12 +2185,12 @@ function importCSV(event) {
   reader.readAsText(file);
 }
 
-// ── CONFIRM RESET ──
-function confirmReset() {
+// ── RESET ALL DATA ──
+function openResetModal() {
   openModal('modal-reset');
 }
 
-function executeResetAllData() {
+function resetAppStateToDefaults() {
   seedLeads();
   counters = { messagesSent: 0, replies: 0, calls: 0 };
   manualRevenue = 0;
@@ -2210,16 +2210,62 @@ function executeResetAllData() {
   detailLead = null;
   currentLeadId = null;
   whatsAppCheckLeadId = null;
+}
+
+function clearDatabaseStores() {
+  return new Promise(resolve => {
+    if (!db) {
+      resolve();
+      return;
+    }
+    try {
+      let tx = db.transaction([STORE, META_STORE], 'readwrite');
+      tx.objectStore(STORE).clear();
+      tx.objectStore(META_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch (err) {
+      resolve();
+    }
+  });
+}
+
+function refreshAfterReset() {
   syncUIState();
-  dbSaveAll();
   closeModal('modal-reset');
   closeModal('modal-detail');
   closeModal('modal-wa-check');
+  closeModal('modal-categories');
+  closeModal('modal-add');
   renderBoard();
   renderObjectionsPage();
   if (document.getElementById('page-analytics').classList.contains('active')) renderAnalytics();
   if (document.getElementById('page-coach').classList.contains('active')) renderCoachPage();
   toast('🗑 All data reset');
+}
+
+function runResetAllData() {
+  let btn = document.getElementById('reset-confirm-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Resetting...';
+  }
+
+  clearDatabaseStores().then(() => {
+    resetAppStateToDefaults();
+    dbSaveAll();
+    refreshAfterReset();
+  }).catch(() => {
+    resetAppStateToDefaults();
+    dbSaveAll();
+    refreshAfterReset();
+  }).finally(() => {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Reset Everything';
+    }
+  });
 }
 
 // ── UTILS ──
