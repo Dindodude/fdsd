@@ -68,6 +68,12 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .pipeline-select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;}
 .pipeline-select:focus{outline:none;}
 .pipeline-sort{max-width:132px;}
+.wa-summary{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;background:var(--surface);}
+.wa-summary-pill{padding:6px 10px;border-radius:999px;border:1px solid var(--border2);background:var(--surface2);color:var(--text2);font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;}
+.wa-summary-pill.active,.wa-summary-pill:hover{border-color:var(--accent);color:var(--accent);}
+.wa-summary-pill.has{border-color:rgba(37,211,102,.25);color:var(--wa);}
+.wa-summary-pill.none{border-color:rgba(255,77,109,.25);color:var(--red);}
+.wa-summary-pill.unknown{border-color:rgba(255,214,10,.25);color:var(--yellow);}
 .search-box{flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:7px 12px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:12px;}
 .search-box::placeholder{color:var(--text3);}
 .search-box:focus{outline:none;border-color:var(--accent);}
@@ -114,6 +120,10 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .mini-btn-more:hover{background:var(--border2);color:var(--text);}
 .followup-badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px;background:var(--red-dim);color:var(--red);}
 .followup-today{background:var(--orange-dim);color:var(--orange);}
+.wa-state-badge{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;margin-top:6px;}
+.wa-state-yes{background:rgba(37,211,102,.12);color:var(--wa);}
+.wa-state-no{background:var(--red-dim);color:var(--red);}
+.wa-state-unknown{background:var(--yellow-dim);color:var(--yellow);}
 
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end;justify-content:center;}
@@ -145,6 +155,9 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .btn-offer{background:var(--yellow-dim);color:var(--yellow);border-color:rgba(255,214,10,.2);}
 .btn-call-prep{background:var(--accent-dim);color:var(--accent);border-color:rgba(184,245,74,.25);}
 .btn-maps{background:var(--surface2);color:var(--text2);border-color:var(--border2);}
+.btn-wa-state-yes{background:rgba(37,211,102,.12);color:var(--wa);border-color:rgba(37,211,102,.25);}
+.btn-wa-state-no{background:var(--red-dim);color:var(--red);border-color:rgba(255,77,109,.25);}
+.btn-wa-state-unknown{background:var(--yellow-dim);color:var(--yellow);border-color:rgba(255,214,10,.25);}
 
 /* status select in modal */
 .status-select,.priority-select,.score-field{width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:8px 10px;border-radius:var(--r);font-family:'DM Sans',sans-serif;font-size:13px;cursor:pointer;}
@@ -535,6 +548,7 @@ LEADOS v3 - NEW FEATURE STYLES
     <div class="btn-icon" onclick="openFilterSheet()">⚙</div>
     <div class="btn-icon" onclick="openAddLead()" style="background:var(--accent-dim);border-color:rgba(184,245,74,.3);color:var(--accent);">+</div>
   </div>
+  <div class="wa-summary" id="wa-summary"></div>
   <div class="pipeline-board" id="board"></div>
 </div>
 
@@ -654,6 +668,26 @@ LEADOS v3 - NEW FEATURE STYLES
         <textarea class="notes-area" id="detail-notes" placeholder="Add notes here..." oninput="updateLeadField('notes',this.value)"></textarea>
       </div>
       <div style="height:20px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-wa-check">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="wa-check-title">WhatsApp Check</div>
+      <button class="modal-close" onclick="closeModal('modal-wa-check')">×</button>
+    </div>
+    <div class="modal-body" style="padding:14px;">
+      <div class="callprep-item" id="wa-check-phone">No phone on file</div>
+      <div class="category-help" id="wa-check-help" style="margin-bottom:12px;">Open the number in WhatsApp, then mark whether the lead actually has WhatsApp.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="action-btn btn-wa-full" id="wa-check-open-btn" onclick="openWhatsAppNumber()">💬 Open WhatsApp</button>
+        <button class="action-btn btn-wa-state-yes" onclick="markWhatsAppStatus('yes')">✅ Has WhatsApp</button>
+        <button class="action-btn btn-wa-state-no" onclick="markWhatsAppStatus('no')">🚫 No WhatsApp</button>
+        <button class="action-btn btn-wa-state-unknown" onclick="markWhatsAppStatus('')">❔ Unknown</button>
+      </div>
     </div>
   </div>
 </div>
@@ -799,6 +833,24 @@ LEADOS v3 - NEW FEATURE STYLES
       <div class="category-help">Default categories are built in. Custom categories you add here will be saved in the app and available when adding leads.</div>
       <div class="section-label" style="margin-top:14px;">Available Categories</div>
       <div class="category-list" id="category-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-reset">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">🗑 Reset All Data</div>
+      <button class="modal-close" onclick="closeModal('modal-reset')">×</button>
+    </div>
+    <div class="modal-body" style="padding:14px;">
+      <div class="callprep-item">This will reset all leads, counters, goals, custom categories, filters, WhatsApp status tracking, and analytics data in this browser.</div>
+      <div class="category-help" style="margin-bottom:12px;">This cannot be undone unless you import a backup file.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="analytics-btn" onclick="closeModal('modal-reset')">Cancel</button>
+        <button class="analytics-btn danger" onclick="executeResetAllData()">Reset Everything</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1021,6 +1073,7 @@ let counters = { messagesSent: 0, replies: 0, calls: 0 };
 let manualRevenue = 0;
 let customCategories = [];
 let sortMode = 'priority';
+let whatsAppCheckLeadId = null;
 
 // ── DB ──
 const DB_NAME = 'leadosdb', DB_VER = 2, STORE = 'leads', META_STORE = 'meta';
@@ -1320,6 +1373,81 @@ function compareLeads(a, b) {
   return a.name.localeCompare(b.name);
 }
 
+function getWhatsAppStatusBadge(status) {
+  if (status === 'yes') return '<span class="wa-state-badge wa-state-yes">💬 Has WhatsApp</span>';
+  if (status === 'no') return '<span class="wa-state-badge wa-state-no">🚫 No WhatsApp</span>';
+  return '<span class="wa-state-badge wa-state-unknown">❔ WhatsApp Unknown</span>';
+}
+
+function renderWhatsAppSummary() {
+  let container = document.getElementById('wa-summary');
+  if (!container) return;
+  let counts = {
+    all: leads.length,
+    yes: leads.filter(l => l.whatsapp === 'yes').length,
+    no: leads.filter(l => l.whatsapp === 'no').length,
+    unknown: leads.filter(l => !l.whatsapp).length
+  };
+  let active = filters.wa.length === 1 ? filters.wa[0] : 'all';
+  container.innerHTML = [
+    { key: 'all', label: 'All Leads', count: counts.all, cls: '' },
+    { key: 'yes', label: 'Has WhatsApp', count: counts.yes, cls: 'has' },
+    { key: 'no', label: 'No WhatsApp', count: counts.no, cls: 'none' },
+    { key: 'unknown', label: 'Unknown', count: counts.unknown, cls: 'unknown' }
+  ].map(item =>
+    '<button class="wa-summary-pill ' + item.cls + (active === item.key ? ' active' : '') + '" onclick="setWhatsAppFilter(\'' + item.key + '\')">' + item.label + ' · ' + item.count + '</button>'
+  ).join('');
+}
+
+function setWhatsAppFilter(mode) {
+  filters.wa = mode === 'all' ? [] : [mode];
+  dbSaveAll();
+  renderBoard();
+}
+
+function checkWhatsAppLead(id) {
+  let lead = leads.find(l => l.id === id);
+  if (!lead) return;
+  whatsAppCheckLeadId = id;
+  document.getElementById('wa-check-title').textContent = 'WhatsApp Check - ' + lead.name;
+  document.getElementById('wa-check-phone').textContent = lead.phone ? ('Number: ' + lead.phone) : 'No phone on file';
+  document.getElementById('wa-check-help').innerHTML = 'Current status: <strong>' + (lead.whatsapp === 'yes' ? 'Has WhatsApp' : lead.whatsapp === 'no' ? 'No WhatsApp' : 'Unknown') + '</strong>. Open the number in WhatsApp, then mark the result.';
+  let openBtn = document.getElementById('wa-check-open-btn');
+  openBtn.style.display = lead.phone ? 'inline-flex' : 'none';
+  openModal('modal-wa-check');
+  if (lead.phone) openWhatsAppNumber();
+}
+
+function openWhatsAppNumber() {
+  let lead = leads.find(l => l.id === whatsAppCheckLeadId);
+  if (!lead || !lead.phone) {
+    toast('❌ No phone number on file');
+    return;
+  }
+  window.open('https://wa.me/' + lead.phone.replace(/[^0-9]/g,''), '_blank');
+}
+
+function markWhatsAppStatus(status) {
+  let lead = leads.find(l => l.id === whatsAppCheckLeadId);
+  if (!lead) return;
+  lead.whatsapp = status;
+  dbSaveAll();
+  renderBoard();
+  if (detailLead && detailLead.id === lead.id) openDetail(lead.id);
+  closeModal('modal-wa-check');
+  toast(status === 'yes' ? '✅ Marked as Has WhatsApp' : status === 'no' ? '🚫 Marked as No WhatsApp' : '❔ WhatsApp status cleared');
+}
+
+function setLeadWhatsAppStatus(id, status) {
+  let lead = leads.find(l => l.id === id);
+  if (!lead) return;
+  lead.whatsapp = status;
+  dbSaveAll();
+  renderBoard();
+  if (detailLead && detailLead.id === id) openDetail(id);
+  toast(status === 'yes' ? '✅ Marked as Has WhatsApp' : '🚫 Marked as No WhatsApp');
+}
+
 // ── PAGES ──
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1357,6 +1485,7 @@ function getFilteredLeads() {
     if (filters.wa.length) {
       if (filters.wa.includes('yes') && l.whatsapp !== 'yes') return false;
       if (filters.wa.includes('no') && l.whatsapp !== 'no') return false;
+      if (filters.wa.includes('unknown') && !!l.whatsapp) return false;
     }
     return true;
   }).sort(compareLeads);
@@ -1388,6 +1517,7 @@ function renderBoard() {
     let cardsEl = col.querySelector('.col-cards');
     statusLeads.forEach(l => cardsEl.appendChild(buildCard(l)));
   });
+  renderWhatsAppSummary();
   updateNavBadge();
 }
 
@@ -1407,7 +1537,6 @@ function buildCard(l) {
   let pClass = 'priority-' + l.priority;
   let pLabel = l.priority === 'hot' ? '🔥 Hot' : l.priority === 'warm' ? '🌤 Warm' : '❄️ Cold';
   let phone = l.phone || '';
-  let waLink = phone ? 'https://wa.me/' + phone.replace(/[^0-9]/g,'') : '#';
   let callLink = phone ? 'tel:' + phone : '#';
   let followupHtml = '';
   if (l.followupDate) {
@@ -1415,6 +1544,7 @@ function buildCard(l) {
     if (l.followupDate < today) followupHtml = `<span class="followup-badge">⚠ Overdue</span>`;
     else if (l.followupDate === today) followupHtml = `<span class="followup-badge followup-today">📅 Today</span>`;
   }
+  let waBadge = getWhatsAppStatusBadge(l.whatsapp);
 
   div.innerHTML = `
     <div class="card-top">
@@ -1424,11 +1554,12 @@ function buildCard(l) {
     <div class="card-niche">${esc(l.niche || '')}${l.city ? ' · ' + esc(l.city) : ''}</div>
     <div class="card-phone">${phone || '<span style="color:var(--text3)">No phone</span>'}</div>
     ${followupHtml}
+    ${waBadge}
     <div class="card-score-bar"><div class="card-score-fill ${scoreClass.split(' ')[1]}" style="width:${score}%"></div></div>
     <div class="card-footer">
       <span class="card-score-label ${scoreClass.split(' ')[0]}">${score >= 80 ? '🔥' : score >= 50 ? '🌤' : '❄️'} ${score}/100</span>
       <div class="card-actions-row">
-        ${phone ? `<a class="mini-btn mini-btn-wa" href="${waLink}" target="_blank" onclick="event.stopPropagation()">💬</a>` : ''}
+        <button class="mini-btn mini-btn-wa" onclick="event.stopPropagation();checkWhatsAppLead('${l.id}')">💬</button>
         ${phone ? `<a class="mini-btn mini-btn-call" href="${callLink}" onclick="event.stopPropagation()">📞</a>` : ''}
         <div class="mini-btn mini-btn-more" onclick="event.stopPropagation();openDetail('${l.id}')">⋯</div>
       </div>
@@ -1470,15 +1601,16 @@ function openDetail(id) {
   document.getElementById('detail-title').textContent = l.name;
 
   let phone = l.phone || '';
-  let waLink = phone ? 'https://wa.me/' + phone.replace(/[^0-9]/g, '') : '#';
   let mapsLink = 'https://maps.google.com/?q=' + encodeURIComponent(l.name + ' ' + (l.address || ''));
   let lostButton = l.status !== 'Not Interested'
     ? '<button class="action-btn btn-maps" onclick="openWhyLost()" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,77,109,.25);">🚫 Lost</button>'
     : '';
 
   document.getElementById('detail-actions').innerHTML = `
-    ${phone ? '<a class="action-btn btn-wa-full" href="' + waLink + '" target="_blank" rel="noopener">💬 WhatsApp</a>' : ''}
+    <button class="action-btn btn-wa-full" onclick="checkWhatsAppLead('${l.id}')">💬 WhatsApp</button>
     ${phone ? '<a class="action-btn btn-call-full" href="tel:' + phone + '">📞 Call</a>' : ''}
+    <button class="action-btn btn-wa-state-yes" onclick="setLeadWhatsAppStatus('${l.id}','yes')">✅ Has WA</button>
+    <button class="action-btn btn-wa-state-no" onclick="setLeadWhatsAppStatus('${l.id}','no')">🚫 No WA</button>
     <button class="action-btn btn-script" onclick="openScripts()">📋 Scripts</button>
     <button class="action-btn btn-offer" onclick="openOffer()">🎯 Offer</button>
     <button class="action-btn btn-call-prep" onclick="openCallPrep()">📞 Prep</button>
@@ -1494,6 +1626,7 @@ function openDetail(id) {
     <div class="detail-field"><div class="detail-field-label">Niche</div><div class="detail-field-val">${esc(l.niche || '-')}</div></div>
     <div class="detail-field"><div class="detail-field-label">Phone</div><div class="detail-field-val">${esc(l.phone || '-')}</div></div>
     <div class="detail-field"><div class="detail-field-label">City</div><div class="detail-field-val">${esc(l.city || '-')}</div></div>
+    <div class="detail-field"><div class="detail-field-label">WhatsApp</div><div class="detail-field-val">${l.whatsapp === 'yes' ? 'Has WhatsApp' : l.whatsapp === 'no' ? 'No WhatsApp' : 'Unknown'}</div></div>
     <div class="detail-field full"><div class="detail-field-label">Address</div><div class="detail-field-val">${esc(l.address || '-')}</div></div>`;
 
   if (l.firstMessageTs) {
@@ -2054,14 +2187,39 @@ function importCSV(event) {
 
 // ── CONFIRM RESET ──
 function confirmReset() {
-  if (confirm('Reset ALL lead data? This cannot be undone.')) {
-    seedLeads();
-    counters = { messagesSent: 0, replies: 0, calls: 0 };
-    manualRevenue = 0;
-    dbSaveAll();
-    renderBoard();
-    toast('🗑 Data reset');
-  }
+  openModal('modal-reset');
+}
+
+function executeResetAllData() {
+  seedLeads();
+  counters = { messagesSent: 0, replies: 0, calls: 0 };
+  manualRevenue = 0;
+  filters = { status: [], priority: [], wa: [], categories: [] };
+  sortMode = 'priority';
+  customCategories = [];
+  goals = { weeklyRev: 1000, monthlyClients: 5, dailyMsgs: 15, dailyFollowups: 10 };
+  dailyProgress = { msgs: 0, followups: 0, closes: 0 };
+  whyLostReasons = {};
+  abStats = {
+    A: { sent: 0, replies: 0, label: 'First Message' },
+    B: { sent: 0, replies: 0, label: 'Value Drop' }
+  };
+  selectedWhyLost = '';
+  currentIdeaNiche = '';
+  closeChecklist = {};
+  detailLead = null;
+  currentLeadId = null;
+  whatsAppCheckLeadId = null;
+  syncUIState();
+  dbSaveAll();
+  closeModal('modal-reset');
+  closeModal('modal-detail');
+  closeModal('modal-wa-check');
+  renderBoard();
+  renderObjectionsPage();
+  if (document.getElementById('page-analytics').classList.contains('active')) renderAnalytics();
+  if (document.getElementById('page-coach').classList.contains('active')) renderCoachPage();
+  toast('🗑 All data reset');
 }
 
 // ── UTILS ──
