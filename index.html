@@ -1202,6 +1202,12 @@ function normalizeCategoryName(name) {
   return String(name || '').replace(/\s+/g, ' ').trim();
 }
 
+function toDisplayCategoryName(name) {
+  let normalized = normalizeCategoryName(name).toLowerCase();
+  if (!normalized) return '';
+  return normalized.replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
 function getAllCategories() {
   let fromLeads = leads.map(l => normalizeCategoryName(l.niche)).filter(Boolean);
   let fromIdeas = Object.keys(CONTENT_IDEAS || {}).map(normalizeCategoryName).filter(Boolean);
@@ -1223,6 +1229,60 @@ function autoCategorizeLead(name, address, city) {
     if (rule.keywords.some(keyword => haystack.includes(keyword))) return rule.category;
   }
   return 'Other';
+}
+
+function categorizeImportedPlace(row) {
+  let categoryCandidates = [];
+  if (row.categoryName) categoryCandidates.push(row.categoryName);
+  Object.keys(row).forEach(key => {
+    if (/^category_\d+$/i.test(key) && row[key]) categoryCandidates.push(row[key]);
+  });
+
+  let normalizedCandidates = categoryCandidates.map(normalizeCategoryName).filter(Boolean);
+  let googleCategory = normalizedCandidates[0] || '';
+  let categoryText = normalizedCandidates.join(' ');
+  let haystack = [row.title, row.address, row.city, categoryText].filter(Boolean).join(' ').toLowerCase();
+
+  const googleCategoryMap = [
+    { niche: 'Auto Repair', keywords: ['auto repair', 'car repair', 'car repair and maintenance', 'mechanic', 'auto body', 'brake shop', 'oil change', 'truck repair', 'vehicle inspection', 'repair service', 'diesel', 'transmission'] },
+    { niche: 'Car Detailing', keywords: ['car detailing', 'detailing', 'car wash', 'ceramic coating', 'undercoating', 'tint', 'ppf', 'auto spa'] },
+    { niche: 'Hair & Barber', keywords: ['barber', 'hair salon', 'hairdresser', 'hairstylist', 'beauty salon'] },
+    { niche: 'Tire Shop', keywords: ['tire shop', 'tire repair', 'wheel store', 'wheel alignment', 'tire dealer', 'tire'] },
+    { niche: 'Real Estate', keywords: ['real estate', 'realtor', 'real estate agency', 'property management', 'brokerage'] },
+    { niche: 'Restaurant', keywords: ['restaurant', 'pizza', 'burger', 'cafe', 'coffee shop', 'eatery', 'bakery', 'bar', 'pub'] },
+    { niche: 'Personal Trainer', keywords: ['personal trainer', 'fitness trainer', 'gym', 'fitness center'] }
+  ];
+
+  for (let rule of googleCategoryMap) {
+    if (rule.keywords.some(keyword => haystack.includes(keyword))) {
+      ensureCategoryExists(rule.niche);
+      return rule.niche;
+    }
+  }
+
+  let autoDetected = autoCategorizeLead(row.title || '', row.address || '', row.city || '');
+  if (autoDetected !== 'Other') {
+    ensureCategoryExists(autoDetected);
+    return autoDetected;
+  }
+
+  let fallback = toDisplayCategoryName(googleCategory) || 'Other';
+  ensureCategoryExists(fallback);
+  return fallback;
+}
+
+function parseCSVLine(line) {
+  return (line.match(/(".*?"|[^,]+)(?=,|$)/g) || []).map(cell =>
+    cell.replace(/^"|"$/g, '').replace(/""/g, '"').trim()
+  );
+}
+
+function getCSVRowObject(headers, values) {
+  let row = {};
+  headers.forEach((header, index) => {
+    row[header] = values[index] || '';
+  });
+  return row;
 }
 
 function populateAddCategorySelect(selectedValue) {
@@ -2181,20 +2241,51 @@ function importCSV(event) {
   let reader = new FileReader();
   reader.onload = e => {
     let lines = e.target.result.split('\n').filter(l => l.trim());
+    if (!lines.length) {
+      toast('❌ CSV is empty');
+      event.target.value = '';
+      return;
+    }
+    let headers = parseCSVLine(lines[0]);
     let added = 0;
     lines.slice(1).forEach(line => {
-      let cols = line.match(/(".*?"|[^,]+)(?=,|$)/g) || [];
-      let clean = cols.map(c => c.replace(/^"|"$/g,'').replace(/""/g,'"').trim());
-      if (!clean[0]) return;
-      if (findDuplicateLead(clean[0], clean[3] || '')) return;
-      let importedCategory = normalizeCategoryName(clean[1]) || autoCategorizeLead(clean[0], '', clean[2] || '');
+      let clean = parseCSVLine(line);
+      let row = getCSVRowObject(headers, clean);
+      let name = row.title || row.name || clean[0] || '';
+      if (!name) return;
+      let phone = row.phone || row.phoneUnformatted || '';
+      if (findDuplicateLead(name, phone)) return;
+      let address = row.address || [row.street, row.city, row.state, row.postalCode, row.countryCode].filter(Boolean).join(', ');
+      let city = row.city || extractCity(address);
+      let importedCategory = categorizeImportedPlace({
+        title: name,
+        address,
+        city,
+        categoryName: row.categoryName || '',
+        category_1: row.category_1 || '',
+        category_2: row.category_2 || '',
+        category_3: row.category_3 || '',
+        category_4: row.category_4 || '',
+        category_5: row.category_5 || '',
+        category_6: row.category_6 || '',
+        category_7: row.category_7 || '',
+        category_8: row.category_8 || '',
+        category_9: row.category_9 || '',
+        category_10: row.category_10 || ''
+      });
       ensureCategoryExists(importedCategory);
       leads.unshift({
         id: 'csv_' + Date.now() + '_' + added,
-        name: clean[0]||'', niche: importedCategory, city: clean[2]||'', phone: clean[3]||'',
-        status: STATUSES.includes(clean[4]) ? clean[4] : 'Not Contacted',
-        priority: ['hot','warm','cold'].includes(clean[5]) ? clean[5] : 'warm',
-        whatsapp: clean[6]||'', pipeline: 'Ontario', notes: clean[10]||'',
+        name,
+        niche: importedCategory,
+        city,
+        address,
+        phone,
+        status: 'Not Contacted',
+        priority: 'warm',
+        whatsapp: '',
+        pipeline: 'Ontario',
+        notes: [row.website ? 'Website: ' + row.website : '', row.email_1 ? 'Email: ' + row.email_1 : ''].filter(Boolean).join('\n'),
         lastContact: '', followupDate: '', dealValue: 0, retainer: 0,
         timeline: [], scoreFactors: {}, score: 0, createdAt: Date.now()
       });
