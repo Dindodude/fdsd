@@ -67,6 +67,7 @@ body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;fon
 .pipeline-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;background:var(--surface);}
 .pipeline-select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:12px;cursor:pointer;}
 .pipeline-select:focus{outline:none;}
+.pipeline-sort{max-width:132px;}
 .search-box{flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:7px 12px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:12px;}
 .search-box::placeholder{color:var(--text3);}
 .search-box:focus{outline:none;border-color:var(--accent);}
@@ -524,6 +525,13 @@ LEADOS v3 - NEW FEATURE STYLES
       <option value="Restaurants">🍕 Restaurants</option>
     </select>
     <input class="search-box" id="search" placeholder="Search leads..." oninput="renderBoard()">
+    <select class="pipeline-select pipeline-sort" id="sort-sel" onchange="renderBoard()">
+      <option value="priority">Sort: Priority</option>
+      <option value="score">Sort: Score</option>
+      <option value="name">Sort: Name</option>
+      <option value="newest">Sort: Newest</option>
+      <option value="followup">Sort: Follow-Up</option>
+    </select>
     <div class="btn-icon" onclick="openFilterSheet()">⚙</div>
     <div class="btn-icon" onclick="openAddLead()" style="background:var(--accent-dim);border-color:rgba(184,245,74,.3);color:var(--accent);">+</div>
   </div>
@@ -819,6 +827,10 @@ LEADOS v3 - NEW FEATURE STYLES
         <div class="filter-pill" data-group="wa" data-val="no" onclick="toggleFilterPill(this,'wa')">✗ No WA</div>
       </div>
     </div>
+    <div class="filter-group">
+      <div class="filter-group-title">Category</div>
+      <div class="filter-pills" id="filter-category-pills"></div>
+    </div>
     <button class="filter-apply" onclick="applyFilters()">Apply Filters</button>
     <button class="analytics-btn" style="width:100%;margin-top:8px;text-align:center;" onclick="clearFilters()">Clear All</button>
   </div>
@@ -834,7 +846,6 @@ LEADOS v3 - NEW FEATURE STYLES
     <div class="coach-date" id="coach-date"></div>
     <div class="coach-greeting" id="coach-greeting"></div>
 
-```
 <!-- Workflow Mode Buttons -->
 <div class="section-heading">⚡ One-Click Workflow</div>
 <div class="workflow-grid">
@@ -881,7 +892,6 @@ LEADOS v3 - NEW FEATURE STYLES
 <div id="reactivation-list"></div>
 
 <div style="height:30px;"></div>
-```
 
   </div>
 </div>
@@ -1006,10 +1016,11 @@ const CATEGORY_RULES = [
 // ── STATE ──
 let leads = [];
 let currentLeadId = null;
-let filters = { status: [], priority: [], wa: [] };
+let filters = { status: [], priority: [], wa: [], categories: [] };
 let counters = { messagesSent: 0, replies: 0, calls: 0 };
 let manualRevenue = 0;
 let customCategories = [];
+let sortMode = 'priority';
 
 // ── DB ──
 const DB_NAME = 'leadosdb', DB_VER = 2, STORE = 'leads', META_STORE = 'meta';
@@ -1039,6 +1050,8 @@ function dbSaveAll() {
   let meta = metaTx.objectStore(META_STORE);
   meta.put({ key: 'counters', val: counters });
   meta.put({ key: 'manualRevenue', val: manualRevenue });
+  meta.put({ key: 'filters', val: filters });
+  meta.put({ key: 'sortMode', val: sortMode });
   meta.put({ key: 'goals', val: goals });
   meta.put({ key: 'dailyProgress', val: dailyProgress });
   meta.put({ key: 'whyLostReasons', val: whyLostReasons });
@@ -1060,6 +1073,8 @@ function dbLoadAll() {
         e2.target.result.forEach(m => {
           if (m.key === 'counters') counters = m.val || counters;
           if (m.key === 'manualRevenue') manualRevenue = m.val || 0;
+          if (m.key === 'filters') filters = Object.assign({ status: [], priority: [], wa: [], categories: [] }, m.val || {});
+          if (m.key === 'sortMode') sortMode = m.val || sortMode;
           if (m.key === 'goals') goals = m.val || goals;
           if (m.key === 'dailyProgress') dailyProgress = m.val || dailyProgress;
           if (m.key === 'whyLostReasons') whyLostReasons = m.val || whyLostReasons;
@@ -1271,6 +1286,40 @@ function getPriority(score) {
   return 'cold';
 }
 
+function normalizeLeadName(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function normalizePhone(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+function findDuplicateLead(name, phone) {
+  let normalizedName = normalizeLeadName(name);
+  let normalizedPhone = normalizePhone(phone);
+  return leads.find(l => {
+    let samePhone = normalizedPhone && normalizePhone(l.phone) === normalizedPhone;
+    let sameName = normalizedName && normalizeLeadName(l.name) === normalizedName;
+    return samePhone || (sameName && (!normalizedPhone || !normalizePhone(l.phone)));
+  }) || null;
+}
+
+function compareLeads(a, b) {
+  if (sortMode === 'name') return a.name.localeCompare(b.name);
+  if (sortMode === 'newest') return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+  if (sortMode === 'score') return calcScore(b) - calcScore(a);
+  if (sortMode === 'followup') {
+    let aDate = a.followupDate || '9999-12-31';
+    let bDate = b.followupDate || '9999-12-31';
+    if (aDate !== bDate) return aDate.localeCompare(bDate);
+  }
+  let priorityOrder = { hot: 0, warm: 1, cold: 2 };
+  let aPriority = priorityOrder[a.priority] ?? 9;
+  let bPriority = priorityOrder[b.priority] ?? 9;
+  if (aPriority !== bPriority) return aPriority - bPriority;
+  return a.name.localeCompare(b.name);
+}
+
 // ── PAGES ──
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1290,6 +1339,12 @@ function showPage(name) {
   if (name === 'objections') renderObjectionsPage();
   updateNavBadge();
 }
+
+function syncUIState() {
+  let sortSelect = document.getElementById('sort-sel');
+  if (sortSelect) sortSelect.value = sortMode;
+}
+
 function getFilteredLeads() {
   let pipeline = document.getElementById('pipeline-sel').value;
   let search = (document.getElementById('search').value || '').toLowerCase();
@@ -1298,12 +1353,13 @@ function getFilteredLeads() {
     if (search && !(l.name.toLowerCase().includes(search) || l.phone.includes(search) || (l.city||'').toLowerCase().includes(search) || (l.niche||'').toLowerCase().includes(search))) return false;
     if (filters.status.length && !filters.status.includes(l.status)) return false;
     if (filters.priority.length && !filters.priority.includes(l.priority)) return false;
+    if (filters.categories.length && !filters.categories.includes(l.niche)) return false;
     if (filters.wa.length) {
       if (filters.wa.includes('yes') && l.whatsapp !== 'yes') return false;
       if (filters.wa.includes('no') && l.whatsapp !== 'no') return false;
     }
     return true;
-  });
+  }).sort(compareLeads);
 }
 
 function renderBoard() {
@@ -1814,13 +1870,16 @@ function openAddLead() {
 function submitAddLead() {
   let name = document.getElementById('add-name').value.trim();
   if (!name) { toast('❌ Name is required'); return; }
+  let phone = document.getElementById('add-phone').value.trim();
+  let existing = findDuplicateLead(name, phone);
+  if (existing && !confirm('A similar lead already exists for ' + existing.name + '. Add this lead anyway?')) return;
   let category = resolveAddLeadCategory();
   if (!category) return;
   let lead = {
     id: 'lead_' + Date.now(),
     name,
     niche: category,
-    phone: document.getElementById('add-phone').value.trim(),
+    phone,
     city: document.getElementById('add-city').value.trim(),
     address: document.getElementById('add-address').value.trim(),
     pipeline: document.getElementById('add-pipeline').value,
@@ -1850,6 +1909,9 @@ function openFilterSheet() {
   document.getElementById('filter-status-pills').innerHTML = STATUSES.map(s =>
     `<div class="filter-pill ${filters.status.includes(s)?'active':''}" data-val="${s}" onclick="toggleFilterPill(this,'status')">${s}</div>`
   ).join('');
+  document.getElementById('filter-category-pills').innerHTML = getAllCategories().map(cat =>
+    `<div class="filter-pill ${filters.categories.includes(cat)?'active':''}" data-group="category" data-val="${esc(cat)}" onclick="toggleFilterPill(this,'category')">${esc(cat)}</div>`
+  ).join('');
   document.getElementById('filter-sheet').classList.add('open');
 }
 
@@ -1861,15 +1923,18 @@ function applyFilters() {
   filters.status = Array.from(document.querySelectorAll('#filter-status-pills .filter-pill.active')).map(e => e.dataset.val);
   filters.priority = Array.from(document.querySelectorAll('#filter-priority-pills .filter-pill.active')).map(e => e.dataset.val);
   filters.wa = Array.from(document.querySelectorAll('#filter-sheet .filter-pill.active')).filter(e => e.dataset.group === 'wa').map(e => e.dataset.val);
+  filters.categories = Array.from(document.querySelectorAll('#filter-category-pills .filter-pill.active')).map(e => e.dataset.val);
   document.getElementById('filter-sheet').classList.remove('open');
+  dbSaveAll();
   renderBoard();
 }
 
 
 function clearFilters() {
-  filters = { status: [], priority: [], wa: [] };
+  filters = { status: [], priority: [], wa: [], categories: [] };
   document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
   document.getElementById('filter-sheet').classList.remove('open');
+  dbSaveAll();
   renderBoard();
 }
 
@@ -1886,6 +1951,7 @@ document.addEventListener('click', e => {
 function saveBackup() {
   let backup = leads.map((l, i) => ({
     id: l.id,
+    niche: l.niche,
     status: l.status,
     priority: l.priority,
     whatsapp: l.whatsapp,
@@ -1898,7 +1964,7 @@ function saveBackup() {
     scoreFactors: l.scoreFactors,
     score: l.score
   }));
-  let payload = JSON.stringify({ version: 3, saved: new Date().toISOString(), counters, manualRevenue, entries: backup }, null, 2);
+  let payload = JSON.stringify({ version: 4, saved: new Date().toISOString(), counters, manualRevenue, filters, sortMode, customCategories, entries: backup }, null, 2);
   let blob = new Blob([payload], { type: 'application/json' });
   let url = URL.createObjectURL(blob);
   let a = document.createElement('a');
@@ -1918,16 +1984,20 @@ function importBackup(event) {
       let entries = parsed.entries || [];
       if (parsed.counters) counters = parsed.counters;
       if (parsed.manualRevenue !== undefined) manualRevenue = parsed.manualRevenue;
+      if (parsed.filters) filters = Object.assign({ status: [], priority: [], wa: [], categories: [] }, parsed.filters);
+      if (parsed.sortMode) sortMode = parsed.sortMode;
+      if (Array.isArray(parsed.customCategories)) customCategories = parsed.customCategories.map(normalizeCategoryName).filter(Boolean);
       let count = 0;
       entries.forEach(s => {
         let lead = leads.find(l => l.id === s.id);
         if (lead) {
           Object.assign(lead, { status: s.status, priority: s.priority, whatsapp: s.whatsapp,
-            notes: s.notes, lastContact: s.lastContact, followupDate: s.followupDate,
+            niche: s.niche || lead.niche || 'Other', notes: s.notes, lastContact: s.lastContact, followupDate: s.followupDate,
             dealValue: s.dealValue, retainer: s.retainer, timeline: s.timeline||[], scoreFactors: s.scoreFactors||{}, score: s.score||0 });
           count++;
         }
       });
+      syncUIState();
       dbSaveAll(); renderBoard();
       toast('✅ Restored ' + count + ' leads');
     } catch(err) { toast('❌ Invalid backup file'); }
@@ -1961,6 +2031,7 @@ function importCSV(event) {
       let cols = line.match(/(".*?"|[^,]+)(?=,|$)/g) || [];
       let clean = cols.map(c => c.replace(/^"|"$/g,'').replace(/""/g,'"').trim());
       if (!clean[0]) return;
+      if (findDuplicateLead(clean[0], clean[3] || '')) return;
       let importedCategory = normalizeCategoryName(clean[1]) || autoCategorizeLead(clean[0], '', clean[2] || '');
       ensureCategoryExists(importedCategory);
       leads.unshift({
@@ -2034,10 +2105,12 @@ function toast(msg) {
 // ── BOOT ──
 openDB().then(() => dbLoadAll()).then(() => {
   if (leads.length === 0) seedLeads();
+  syncUIState();
   renderBoard();
   renderObjectionsPage();
 }).catch(() => {
   if (leads.length === 0) seedLeads();
+  syncUIState();
   renderBoard();
   renderObjectionsPage();
 });
