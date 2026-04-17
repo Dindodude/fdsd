@@ -1074,6 +1074,7 @@ let manualRevenue = 0;
 let customCategories = [];
 let sortMode = 'priority';
 let whatsAppCheckLeadId = null;
+let appInitialized = false;
 
 // ── DB ──
 const DB_NAME = 'leadosdb', DB_VER = 2, STORE = 'leads', META_STORE = 'meta';
@@ -1111,6 +1112,7 @@ function dbSaveAll() {
   meta.put({ key: 'abStats', val: abStats });
   meta.put({ key: 'closeChecklist', val: closeChecklist });
   meta.put({ key: 'customCategories', val: customCategories });
+  meta.put({ key: 'appInitialized', val: appInitialized });
 }
 
 function dbLoadAll() {
@@ -1134,6 +1136,7 @@ function dbLoadAll() {
           if (m.key === 'abStats') abStats = m.val || abStats;
           if (m.key === 'closeChecklist') closeChecklist = m.val || closeChecklist;
           if (m.key === 'customCategories') customCategories = Array.isArray(m.val) ? m.val : customCategories;
+          if (m.key === 'appInitialized') appInitialized = !!m.val;
         });
         res();
       };
@@ -1167,6 +1170,15 @@ function seedLeads() {
     score: 0,
     createdAt: Date.now()
   }));
+}
+
+function ensureInitialData() {
+  if (appInitialized) return;
+  if (leads.length === 0) {
+    seedLeads();
+  }
+  appInitialized = true;
+  dbSaveAll();
 }
 
 function mapStatus(s) {
@@ -2082,22 +2094,8 @@ document.addEventListener('click', e => {
 
 // ── BACKUP / IMPORT ──
 function saveBackup() {
-  let backup = leads.map((l, i) => ({
-    id: l.id,
-    niche: l.niche,
-    status: l.status,
-    priority: l.priority,
-    whatsapp: l.whatsapp,
-    notes: l.notes,
-    lastContact: l.lastContact,
-    followupDate: l.followupDate,
-    dealValue: l.dealValue,
-    retainer: l.retainer,
-    timeline: l.timeline,
-    scoreFactors: l.scoreFactors,
-    score: l.score
-  }));
-  let payload = JSON.stringify({ version: 4, saved: new Date().toISOString(), counters, manualRevenue, filters, sortMode, customCategories, entries: backup }, null, 2);
+  let backup = leads.map(l => Object.assign({}, l));
+  let payload = JSON.stringify({ version: 5, saved: new Date().toISOString(), counters, manualRevenue, filters, sortMode, customCategories, appInitialized, entries: backup }, null, 2);
   let blob = new Blob([payload], { type: 'application/json' });
   let url = URL.createObjectURL(blob);
   let a = document.createElement('a');
@@ -2120,16 +2118,38 @@ function importBackup(event) {
       if (parsed.filters) filters = Object.assign({ status: [], priority: [], wa: [], categories: [] }, parsed.filters);
       if (parsed.sortMode) sortMode = parsed.sortMode;
       if (Array.isArray(parsed.customCategories)) customCategories = parsed.customCategories.map(normalizeCategoryName).filter(Boolean);
+      if (parsed.appInitialized !== undefined) appInitialized = !!parsed.appInitialized;
+      leads = [];
       let count = 0;
       entries.forEach(s => {
-        let lead = leads.find(l => l.id === s.id);
-        if (lead) {
-          Object.assign(lead, { status: s.status, priority: s.priority, whatsapp: s.whatsapp,
-            niche: s.niche || lead.niche || 'Other', notes: s.notes, lastContact: s.lastContact, followupDate: s.followupDate,
-            dealValue: s.dealValue, retainer: s.retainer, timeline: s.timeline||[], scoreFactors: s.scoreFactors||{}, score: s.score||0 });
-          count++;
-        }
+        let lead = Object.assign({
+          id: s.id || ('import_' + Date.now() + '_' + count),
+          name: s.name || '',
+          niche: s.niche || 'Other',
+          phone: s.phone || '',
+          address: s.address || '',
+          city: s.city || '',
+          pipeline: s.pipeline || 'Ontario',
+          status: 'Not Contacted',
+          priority: 'warm',
+          whatsapp: '',
+          notes: '',
+          lastContact: '',
+          followupDate: '',
+          dealValue: 0,
+          retainer: 0,
+          timeline: [],
+          scoreFactors: {},
+          score: 0,
+          createdAt: Date.now()
+        }, s);
+        if (!lead.city && lead.address) lead.city = extractCity(lead.address);
+        lead.niche = normalizeCategoryName(lead.niche) || 'Other';
+        ensureCategoryExists(lead.niche);
+        leads.push(lead);
+        count++;
       });
+      appInitialized = true;
       syncUIState();
       dbSaveAll(); renderBoard();
       toast('✅ Restored ' + count + ' leads');
@@ -2191,7 +2211,7 @@ function openResetModal() {
 }
 
 function resetAppStateToDefaults() {
-  seedLeads();
+  leads = [];
   counters = { messagesSent: 0, replies: 0, calls: 0 };
   manualRevenue = 0;
   filters = { status: [], priority: [], wa: [], categories: [] };
@@ -2210,6 +2230,7 @@ function resetAppStateToDefaults() {
   detailLead = null;
   currentLeadId = null;
   whatsAppCheckLeadId = null;
+  appInitialized = true;
 }
 
 function clearDatabaseStores() {
@@ -2308,12 +2329,12 @@ function toast(msg) {
 
 // ── BOOT ──
 openDB().then(() => dbLoadAll()).then(() => {
-  if (leads.length === 0) seedLeads();
+  ensureInitialData();
   syncUIState();
   renderBoard();
   renderObjectionsPage();
 }).catch(() => {
-  if (leads.length === 0) seedLeads();
+  ensureInitialData();
   syncUIState();
   renderBoard();
   renderObjectionsPage();
