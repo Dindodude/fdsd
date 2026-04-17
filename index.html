@@ -574,7 +574,7 @@ LEADOS v3 - NEW FEATURE STYLES
       <button class="analytics-btn" onclick="saveBackup()">💾 Save Backup</button>
       <label class="analytics-btn">📂 Import Backup<input type="file" accept=".json" style="display:none" onchange="importBackup(event)"></label>
       <label class="analytics-btn">📥 Import CSV<input type="file" accept=".csv" style="display:none" onchange="importCSV(event)"></label>
-      <button class="analytics-btn danger" type="button" id="reset-data-btn" onclick="openResetModal()">🗑 Reset All Data</button>
+      <button class="analytics-btn danger" type="button" id="reset-data-btn" onclick="beginResetFlow()">🗑 Reset All Data</button>
     </div>
   </div>
 </div>
@@ -1075,6 +1075,8 @@ let customCategories = [];
 let sortMode = 'priority';
 let whatsAppCheckLeadId = null;
 let appInitialized = false;
+let resetArmTimer = null;
+let resetArmed = false;
 
 // ── DB ──
 const DB_NAME = 'leadosdb', DB_VER = 2, STORE = 'leads', META_STORE = 'meta';
@@ -2206,6 +2208,29 @@ function importCSV(event) {
 }
 
 // ── RESET ALL DATA ──
+function updateResetButtonLabel() {
+  let btn = document.getElementById('reset-data-btn');
+  if (!btn) return;
+  btn.textContent = resetArmed ? '⚠ Tap Again to Reset' : '🗑 Reset All Data';
+}
+
+function beginResetFlow() {
+  if (resetArmed) {
+    if (resetArmTimer) clearTimeout(resetArmTimer);
+    resetArmed = false;
+    updateResetButtonLabel();
+    runResetAllData();
+    return;
+  }
+  resetArmed = true;
+  updateResetButtonLabel();
+  toast('Tap Reset All Data again within 5 seconds to confirm');
+  resetArmTimer = setTimeout(() => {
+    resetArmed = false;
+    updateResetButtonLabel();
+  }, 5000);
+}
+
 function openResetModal() {
   openModal('modal-reset');
 }
@@ -2252,8 +2277,26 @@ function clearDatabaseStores() {
   });
 }
 
+function deleteAppDatabase() {
+  return new Promise(resolve => {
+    if (!window.indexedDB || !indexedDB.deleteDatabase) {
+      resolve();
+      return;
+    }
+    try {
+      if (db) db.close();
+    } catch (err) {}
+    db = null;
+    let request = indexedDB.deleteDatabase(DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+  });
+}
+
 function refreshAfterReset() {
   syncUIState();
+  updateResetButtonLabel();
   closeModal('modal-reset');
   closeModal('modal-detail');
   closeModal('modal-wa-check');
@@ -2268,23 +2311,46 @@ function refreshAfterReset() {
 
 function runResetAllData() {
   let btn = document.getElementById('reset-confirm-btn');
+  let mainBtn = document.getElementById('reset-data-btn');
+  resetArmed = false;
+  if (resetArmTimer) clearTimeout(resetArmTimer);
+  updateResetButtonLabel();
   if (btn) {
     btn.disabled = true;
     btn.textContent = 'Resetting...';
   }
+  if (mainBtn) {
+    mainBtn.disabled = true;
+    mainBtn.textContent = 'Resetting...';
+  }
 
-  clearDatabaseStores().then(() => {
-    resetAppStateToDefaults();
-    dbSaveAll();
-    refreshAfterReset();
-  }).catch(() => {
-    resetAppStateToDefaults();
-    dbSaveAll();
-    refreshAfterReset();
-  }).finally(() => {
+  resetAppStateToDefaults();
+  refreshAfterReset();
+
+  Promise.resolve()
+    .then(() => {
+      try { localStorage.clear(); } catch (err) {}
+      try { sessionStorage.clear(); } catch (err) {}
+    })
+    .then(() => clearDatabaseStores())
+    .then(() => deleteAppDatabase())
+    .then(() => openDB())
+    .then(() => {
+      dbSaveAll();
+    })
+    .catch(() => {
+      try {
+        dbSaveAll();
+      } catch (err) {}
+    })
+    .finally(() => {
     if (btn) {
       btn.disabled = false;
       btn.textContent = 'Reset Everything';
+    }
+    if (mainBtn) {
+      mainBtn.disabled = false;
+      updateResetButtonLabel();
     }
   });
 }
